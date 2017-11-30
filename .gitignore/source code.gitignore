@@ -1,0 +1,173 @@
+Tab Tab1 = instance.ActiveTab;
+
+Random rndGenerator = new Random();
+
+int Time1 = Convert.ToInt32(project.Variables["time1"].Value);
+int Time2 = Convert.ToInt32(project.Variables["time2"].Value);
+
+int colSites1 = Convert.ToInt32(project.Variables["num_sites"].Value);
+int colSites2 = Convert.ToInt32(project.Variables["num_sites1"].Value);
+
+SibboraHelper.WebHelper wHelper = new SibboraHelper.WebHelper(instance, project);
+wHelper.GlobalKMEmulate = true;
+
+IZennoList lstSites = project.Lists["sites"];
+if (lstSites.Count==0) {
+	project.SendInfoToLog("Добавьте в список сайтов сайты и запустите снова",true);
+	return "oki";
+}
+IZennoList lstKey = project.Lists["key"];
+if (lstKey.Count==0) {
+	project.SendInfoToLog("Добавьте в список сайтов сайты и запустите снова",true);
+	return "oki";
+}
+IZennoList lstSitesInput = project.Lists["site_input"];
+if (lstSites.Count==0) {
+	project.SendInfoToLog("Добавьте в список сайтов сайты и запустите снова",true);
+	return "oki";
+}
+string strQuery = string.Empty;
+string strAPIResponse = string.Empty;
+
+bool ProtectXPath = true;
+
+int PauseBefore = rndGenerator.Next(0, 50);
+int PauseBetweenChecks = rndGenerator.Next(0, 50);
+int Timeout = rndGenerator.Next(15000, 30000);
+int FullEmulationDelayFrom = rndGenerator.Next(0, 50);
+int FullEmulationDelayTo = rndGenerator.Next(0, 50);
+int SendTextMinDelay = rndGenerator.Next(0, 50);
+int SendTextMaxDelay = rndGenerator.Next(0, 50);
+
+int intSpeedModeSend = rndGenerator.Next(0, 5000);
+wHelper.PauseBefore = intSpeedModeSend;
+
+bool blnMouseEmulate = Convert.ToBoolean(project.Variables["mouse"].Value);
+wHelper.GlobalKMEmulate = blnMouseEmulate;
+
+wHelper.PauseBefore = rndGenerator.Next(1000,5000);
+
+// Получаю GenHistory
+string GenSites = string.Empty;
+List<string> lstReCaptchaGnizer = new List<string>(); //Создадим временный список
+string strResultFileName = String.Empty; //Объявим переменную, в которую будет помещён путь к файлу
+string strSourceReCaptchaGnizer = project.Directory + @"\Hyper YouTube v.3.0\";
+lstReCaptchaGnizer.AddRange(Directory.GetFiles(strSourceReCaptchaGnizer, "*.xmlz", SearchOption.AllDirectories));
+for (int v=0; v<lstReCaptchaGnizer.Count; v++) {
+	if (lstReCaptchaGnizer.Count==0) break;
+	strResultFileName = lstReCaptchaGnizer[0];
+	lstReCaptchaGnizer.RemoveAt(0);
+	if (strResultFileName.Contains("GenSites")) {
+		GenSites = Path.Combine(strResultFileName);
+		if(!File.Exists(GenSites)) {
+		    throw new Exception(String.Format("Шаблон GenSites не найден: {0}", GenSites));
+		}
+		break;
+	}
+}
+var mapVars = new List<Tuple<string, string>>();
+mapVars.Add(new Tuple<string, string>("java", "java"));  // proxy - переменная в текущем проекте, IN_proxy - переменная в ReCaptchaGnizer
+
+bool blnGenHistory = Convert.ToBoolean(project.Variables["gen_history"].Value);
+
+//После соблюдения анонимности бот должен имитируя действия живого человека:
+int i=0;
+int RandomSites = rndGenerator.Next(colSites1, colSites2);
+int RMX = 0;
+string Sites = string.Empty;
+// Серфинг по сайтам
+project.SendInfoToLog(string.Format("Начал серфить по {0} сайтам",RandomSites),true);
+for (i=0; i<RandomSites; i++) {
+	RMX = rndGenerator.Next(0, lstSitesInput.Count);
+	if (lstSitesInput.Count==0) break;
+	Sites = lstSitesInput[RMX];
+	lstSitesInput.RemoveAt(RMX);
+	lstSitesInput.Add(Sites);
+	Tab1.Navigate(Sites);
+	Tab1.WaitDownloading();
+	Thread.Sleep(rndGenerator.Next(1000, 2000));
+}
+// Получаю названия каналов
+List<string> lstNameChannel = new List<string>();
+lock (SyncObjects.ListSyncer) {
+	for (i=0; i<lstSites.Count; i++) {
+		string strSites = lstSites[0];
+		lstSites.RemoveAt(0);
+		lstSites.Add(strSites);
+		strAPIResponse = ZennoPoster.HttpGet(strSites, "", "UTF-8", ZennoLab.InterfacesLibrary.Enums.Http.ResponceType.BodyOnly); 
+		strAPIResponse = new Regex(@"(?<=content="").*(?=\ -\ YouTube)").Match(strAPIResponse).Value;
+		if (strAPIResponse.Contains(";")) strAPIResponse = new Regex(@"(?<=;).*").Match(strAPIResponse).Value;
+		if (strAPIResponse!=string.Empty) lstNameChannel.Add(strAPIResponse);
+	}
+}
+
+Tab1.Navigate("https://google.com",Sites);
+Tab1.WaitDownloading();
+if (blnGenHistory) {
+	project.ExecuteProject(GenSites, mapVars, true, true);
+}
+int rnd = rndGenerator.Next(0, lstKey.Count); 
+string strKey = lstKey[rnd];
+Tab1.FindElementByXPath("//input[@name='q']", 0).SetValue(strKey,"Full");
+instance.WaitFieldEmulationDelay();
+// Эмулировать ввод текста
+instance.SendText("{ENTER}", 15);
+Thread.Sleep(3000);
+Tab1.WaitDownloading(); 
+Tab1.Navigate("https://www.google.com/search?q="+ strKey +"&dcr=0&source=lnms&tbm=vid");
+Tab1.WaitDownloading();
+if (blnGenHistory) {
+	project.ExecuteProject(GenSites, mapVars, true, true);
+}
+List<string> lstVideo = new List<string>();
+while (true) {
+	int n=0;
+	HtmlElementCollection Links = Tab1.FindElementsByXPath("//div[contains(@class, 'rc')]");
+	foreach(HtmlElement elLinks in Links.Elements) {
+		string strLink = elLinks.FindChildByXPath("//div[contains(@class, 's')]/descendant::div[contains(@class, 'slp')]",n).InnerHtml;
+		for (i=0; i<lstNameChannel.Count; i++) {
+			string strName = lstNameChannel[0];
+			lstNameChannel.RemoveAt(0);
+			lstNameChannel.Add(strName);
+			if (strLink.Contains(strName)) {
+				elLinks.FindChildByXPath("//h3/a",n).Click();
+				Tab1.WaitDownloading();
+				if (!Tab1.URL.Contains("youtube")) {
+					string VideoURL = elLinks.FindChildByXPath("//h3/a",n).GetAttribute("href");
+					Tab1.Navigate(VideoURL);
+				}
+				if (blnGenHistory) {
+					project.ExecuteProject(GenSites, mapVars, true, true);
+				}
+				Tab1.WaitDownloading();
+				break;			
+			}
+		}
+		if (Tab1.URL.Contains("youtube")) break;
+		n++;
+	}
+	if (Tab1.URL.Contains("youtube")) break;
+	if (!Tab1.FindElementByXPath("//a[contains(@id,'pnnext')]",0).IsVoid) {
+		Tab1.FindElementByXPath("//a[contains(@id,'pnnext')]",0).Click();
+		Tab1.WaitDownloading();
+		continue;
+	} else {
+		break;
+	}
+}
+Thread.Sleep(rndGenerator.Next(Time1,Time2)*1000);
+string URL = string.Empty;
+string strVideoUrl = string.Empty;
+lock (SyncObjects.ListSyncer) {
+	URL = lstSites[0];
+	lstSites.RemoveAt(0);
+	lstSites.Add(URL);
+}
+Tab1.Navigate(URL);
+Tab1.WaitDownloading();
+Tab1.FindElementByXPath("//div[contains(@class,'tab-content')]",1).Click();
+Tab1.WaitDownloading();
+Thread.Sleep(rndGenerator.Next(Time1,Time2)*1000);
+strAPIResponse = ZennoPoster.HttpGet(URL+"/videos", "", "UTF-8", ZennoLab.InterfacesLibrary.Enums.Http.ResponceType.BodyOnly); 
+
+return strAPIResponse;
